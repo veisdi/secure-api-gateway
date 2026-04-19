@@ -1,13 +1,17 @@
 package main
 
 import (
+	"log/slog"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"os"
 	"time"
 
+	"secure-api-gateway/internal/cache"
 	"secure-api-gateway/internal/config"
 	"secure-api-gateway/internal/logger"
+	"secure-api-gateway/internal/middleware"
 )
 
 var proxy *httputil.ReverseProxy
@@ -74,5 +78,24 @@ func main() {
 	err = server.ListenAndServe()
 	if err != nil {
 		logger.Log.Fatal("500: Error fatal", "fatal err", err)
+	}
+	// 1. Инициализация Redis
+	cache.InitRedis()
+	defer cache.CloseRedis()
+
+	// Загрузка секретного ключа из окружения
+	secretKey := []byte(os.Getenv("JWT_SECRET"))
+	if secretKey == nil || len(secretKey) == 0 {
+		slog.Error("JWT_SECRET not set")
+		os.Exit(1)
+	}
+
+	mux := http.NewServeMux()
+	handler := middleware.JWTAuthMiddleware(secretKey)(mux)
+
+	slog.Info("Server starting on :8080")
+	if err := http.ListenAndServe(":8080", handler); err != nil {
+		slog.Error("Server failed", "error", err)
+		os.Exit(1)
 	}
 }
